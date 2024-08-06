@@ -220,7 +220,7 @@ spec:
 kubectl apply -f policy.yml
 ```
 
-#### اختبار السياسة:
+#### اختبارال Policy:
 
 1. **الاتصال من `tiefighter`**:
    ```sh
@@ -260,19 +260,19 @@ spec:
                 path: /v1/request-landing
 ```
 
-### اختبار المسارات:
+### اختبار ال Paths:
 
 1. **محاولة الوصول لمكان غير مسموح بيه**:
    ```sh
    kubectl exec tiefighter -- curl -s -XPUT deathstar.default.svc.cluster.local/v1/exhaust-port
    ```
 
-2. **تطبيق السياسة مع المسارات**:
+2. **تطبيق ال Policy مع ال Paths**:
    ```sh
    kubectl apply -f policy.yml
    ```
 
-3. **محاولة الوصول بعد تطبيق السياسة**:
+3. **محاولة الوصول بعد تطبيق ال Policy**:
    ```sh
    kubectl exec tiefighter -- curl -s -XPUT deathstar.default.svc.cluster.local/v1/exhaust-port
    ```
