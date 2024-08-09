@@ -475,7 +475,6 @@ l2announcements:
 
 ### ملف YAML
 
-أكيد، هننسق محتوى ملف `deathstar.yaml` بالشكل التالي:
 
 ```yaml
 ---
