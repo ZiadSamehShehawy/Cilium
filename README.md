@@ -297,8 +297,8 @@ spec:
 
 استخدام Cilium Network Policies بيساعدك في حماية الـ Kubernetes cluster بتاعك عن طريق تحديد مين يقدر يوصل لمين وإيه العمليات اللي مسموح بيها. باستخدام الـ Policies دي، تقدر تحافظ على أمان الشبكة وتمنع أي وصول غير مصرح بيه.
 
+
 # **Cilium LoadBalancer IPAM and L2 Service Announcement**
-أكيد، خليني أوضح لك الكلام بشكل أبسط وأوضح وباللغة العامية:
 
 ---
 
