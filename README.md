@@ -475,41 +475,9 @@ l2announcements:
 
 ### ملف YAML
 
-```yaml
-# deathstar.yaml
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: deathstar
-  labels:
-    color: red
-spec:
-  type: ClusterIP
-  ports:
-    - port: 80
-  selector:
-    org: empire
-    class: deathstar
----
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: deathstar
-spec:
-  selector:
-    matchLabels:
-      org: empire
-      class: deathstar
-
-# **Cilium LoadBalancer IPAM and L2 Service Announcement**
-
-## **1. Deploying the Death Star Service**
-
-### YAML Manifest
+أكيد، هننسق محتوى ملف `deathstar.yaml` بالشكل التالي:
 
 ```yaml
-# deathstar.yaml
 ---
 apiVersion: v1
 kind: Service
@@ -547,6 +515,19 @@ spec:
           image: docker.io/cilium/starwars
           imagePullPolicy: IfNotPresent
 ```
+
+### شرح الملف:
+
+- **Service**: 
+  - ال `kind: Service` يعنى انك بتمثل خدمة من نوع `ClusterIP` بتشتغل على المنفذ 80. الخدمة بتكون متاحة داخليًا داخل الكلاستر.
+  - ال `selector` هنا بيتوافق مع `Deployment` اللى ليه نفس الـ labels عشان الخدمة تشتغل بشكل صحيح.
+
+- **Deployment**:
+  - ال `replicas: 2` يعنى إنه هيتم تشغيل نسختين من الـ Pod الخاص بتطبيق `deathstar`.
+  - ال `containers` فيه تعريف الحاويات (Containers) الخاصة بالتطبيق، وتحديد صورة الحاوية اللى هتشتغل.
+
+كل شيء مضبوط وجاهز للاستخدام في Kubernetes.
+
 
 ### Adding a Public IP to the Service
 
