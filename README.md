@@ -864,8 +864,6 @@ docker exec -ti clab-garp-demo-neighbor curl --connect-timeout 1 $SVC2_IP/v1/
 
 ### التحدي العملي:
 
-في هذا التحدي، هنقوم بعمل الآتي:
-
 1. عرض Death Star على المنفذ 80 بخدمة جديدة من نوع LoadBalancer.
 2. إنشاء Pool جديد للـ IPs باستخدام `Cilium Load-Balancer IP Pool`.
 3. إنشاء سياسة إعلان جديدة لـ L2 للإعلان عن IPs الخدمة على الواجهة `eth0`.
