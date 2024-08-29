@@ -979,3 +979,715 @@ SVC2_IP=$(kubectl get svc deathstar-3 -o jsonpath='{.status.loadBalancer.ingress
 echo $SVC2_IP
 docker exec -ti clab-garp-demo-neighbor curl --connect-timeout 1 $SVC2_IP/v1/
 ```
+
+----------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------------
+#API Gateway
+----------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------------
+
+# 📍📍📍📍📍📍📍📍📍📍📍📍📍📍📍📍📍
+## 🚀 **API Gateway - كل اللي محتاج تعرفه!** 🚀
+📍📍📍📍📍📍📍📍📍📍📍📍📍📍📍📍📍
+
+### 🎯 **يعني ايه Gateway API؟**
+الـ **Gateway API** هو مجموعة من الموارد اللي في Kubernetes واللي بتخليك تتحكم في **حركة المرور** (traffic) اللي جاية من بره الـ **كلاستر** (cluster) ورايحة للخدمات الداخلية جوا الكلاستر. يعتبر الـ Gateway API هو التطور الطبيعي للـ **Ingress API**، وبيوفر ليك **تحكم أكتر** و**مرونة أكبر** في إدارة وتوجيه حركة المرور.
+
+### 🔑 **المفاهيم الأساسية:**
+- ال**Gateway**: نقطة دخول حركة المرور من بره الكلاستر.
+- ال**GatewayClass**: تعريف لنوع الـ Gateway والمواصفات اللي بيدعمها.
+- ال**HTTPRoute**: كيفية توجيه حركة المرور بناءً على المسار (path) أو الـ host.
+- ال**TCPRoute**: كيفية توجيه حركة المرور بناءً على الـ TCP.
+- ال**TLSRoute**: كيفية توجيه حركة المرور بناءً على الـ TLS.
+- ال**BackendPolicy**: السياسات اللي بتتطبق على الخدمات الداخلية (backends).
+
+### 💡 **الفايدة من Gateway API:**
+1. **مرونة أكبر**: بيديك تحكم كامل في إدارة حركة المرور.
+2. **قابلية التوسع**: بيسهل إدارة وتوجيه حركة المرور في كلاستر كبير ومعقد.
+3. **تكامل أفضل**: بيسهل الدمج مع الأدوات والخدمات التانية.
+
+### ⚙️ **مثال بسيط:**
+
+لو عندك **خدمة ويب** عايز توصلها للناس من بره الكلاستر، تقدر تستخدم الـ Gateway API عشان تحدد بوابة (Gateway) وتوجه حركة المرور للخدمة بناءً على المسار (path) أو الـ host.
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: Gateway
+metadata:
+  name: my-gateway
+spec:
+  gatewayClassName: my-gateway-class
+  listeners:
+    - protocol: HTTP
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: HTTPRoute
+metadata:
+  name: my-route
+spec:
+  parentRefs:
+    - name: my-gateway
+  rules:
+    - matches:
+        - path:
+            type: Prefix
+            value: /my-service
+      forwardTo:
+        - serviceName: my-service
+          port: 80
+```
+
+📌 في المثال ده، الـ **Gateway** بيحدد نقطة دخول لحركة المرور على البورت 80، و`HTTPRoute` بيحدد إن حركة المرور اللي جاية على المسار `/my-service` تتوجه للخدمة `my-service` على البورت 80.
+
+### 🔥 **الخلاصة:**
+الـ **Gateway API** هو أداة قوية لإدارة وتوجيه حركة المرور في Kubernetes، بيساعدك تتحكم بشكل أفضل في حركة المرور اللي بتيجي من بره الكلاستر وبتروح للخدمات الداخلية.
+
+---
+
+## 📝 **شرح Gateway API:**
+الـ **Gateway API** مشروع فرعي ضمن مشروع **Kubernetes SIG-Network** لاستبدال **Ingress**. الهدف منه هو توفير مجموعة من الموارد اللي بتمكن من نمذجة شبكة الخدمات داخل Kubernetes بشكل **توجيهي، قابل للنقل، وقابل للتوسيع**.
+
+### 🛠️ **دعم Cilium لـ Gateway API:**
+Cilium بيدعم Gateway API الإصدار v1.1.0 للموارد التالية:
+- **GatewayClass**
+- **Gateway**
+- **HTTPRoute**
+- **GRPCRoute**
+- **TLSRoute** (تجريبي)
+- **ReferenceGrant**
+
+### 📋 **الخطوات المسبقة (Prerequisites):**
+1. ال**NodePort**: لازم يكون Cilium مهيأ بتفعيل NodePort باستخدام `nodePort.enabled=true` أو بتفعيل استبدال kube-proxy باستخدام `kubeProxyReplacement=true`.
+2. ال**L7 Proxy**: لازم يكون Cilium مهيأ بتفعيل L7 Proxy باستخدام `l7Proxy=true` (مفعل افتراضيًا).
+3. ال**CRDs**: لازم تثبيت الموارد التالية من Gateway API v1.1.0 باستخدام الأوامر دي:
+
+    ```sh
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gatewayclasses.yaml
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_gateways.yaml
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_httproutes.yaml
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_referencegrants.yaml
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/standard/gateway.networking.k8s.io_grpcroutes.yaml
+    kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/gateway-api/v1.1.0/config/crd/experimental/gateway.networking.k8s.io_tlsroutes.yaml
+    ```
+
+### ⚙️ **التركيب:**
+1. التحقق من إصدار `cilium-cli`: تأكد من إن إصدار `cilium-cli` هو `v0.15.0` أو أحدث. للتحقق من الإصدار المثبت:
+
+    ```sh
+    cilium version --client
+    ```
+
+### ✨ **استمتع باستخدام Gateway API في مشاريع Kubernetes الخاصة بك! 🚀**
+
+
+---
+
+حاضر، هكتبهولك بالعامية أكتر:
+
+---
+
+## تثبيت واستخدام Cilium مع Gateway API
+
+### 1. نجيب أحدث إصدار من Cilium CLI
+
+
+
+```bash
+CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+CLI_ARCH=amd64
+if [ "$(uname -m)" = "aarch64" ]; then CLI_ARCH=arm64; fi
+curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
+sha256sum --check cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
+sudo tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
+rm cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
+```
+
+### 2. نفعّل الـ Cilium Gateway API Controller باستخدام Helm
+
+هنشغل Cilium ونديله شوية إعدادات خاصة:
+
+```bash
+helm upgrade cilium cilium/cilium --version 1.16.0 \
+    --namespace kube-system \
+    --reuse-values \
+    --set kubeProxyReplacement=true \
+    --set gatewayAPI.enabled=true
+```
+
+### 3. نعمل إعادة تشغيل لـ Cilium Operator وDaemonSet
+
+عشان نطمن إن التغييرات اشتغلت تمام، نعمل إعادة تشغيل:
+
+```bash
+kubectl -n kube-system rollout restart deployment/cilium-operator
+kubectl -n kube-system rollout restart ds/cilium
+```
+
+### 4. نطمن إن كل حاجة شغالة كويس
+
+نتأكد من حالة الـ Cilium Agent وOperator:
+
+```bash
+cilium status
+```
+
+## تفعيل Host Network Mode
+
+### 1. نشغل Host Network Mode
+
+ده إعدادات عشان نفعّل Host Network Mode:
+
+```yaml
+gatewayAPI:
+  enabled: true
+  hostNetwork:
+    enabled: true
+```
+
+### 2. نحدد منفذ الشبكة
+
+نضبط المنفذ عشان نقدر ن Listen الحركة عليه:
+
+```yaml
+spec:
+  listeners:
+    - port: 8080
+```
+
+## فحص الموارد
+
+### 1. نشوف موارد الـ Gateway
+
+نستخدم الأمر دا عشان نجيب كل الـ Gateway الموجودين:
+
+```bash
+kubectl get gateway -A
+```
+
+### 2. نشوف موارد الـ HTTPRoute
+
+نتأكد إن كل الـ HTTPRoute شغالين كويس:
+
+```bash
+kubectl get httproute -A
+```
+
+## المشاكل الشائعة وحلها
+
+- **لو الـ Backend Service مش موجودة**:
+  
+  نشوف تفاصيل الـ HTTPRoute باستخدام:
+  ```bash
+  kubectl describe httproute <name>
+  ```
+
+- **لو الـ Gateway مش متعرف صح**:
+
+  نستخدم نفس الأمر اللي فوق:
+  ```bash
+  kubectl describe httproute <name>
+  ```
+
+- **فحص سجلات الـ Cilium Operator**:
+
+  نجيب اللوجات الخاصة بالـ Gateway من الـ Cilium Operator:
+  ```bash
+  kubectl logs -n kube-system deployments/cilium-operator | grep gateway
+  ```
+
+
+
+## الخلاصة
+
+الـ Gateway API بيديك واجهة قوية لإدارة الترافيك في Kubernetes. باستخدام Cilium، تقدر تستفيد من كل الميزات دي وتزود أمان وإدارة الشبكات في الكلاستر بتاعك.
+
+### خطوات إضافية للتحقق
+
+📌 اتأكد من وجود الـ CRDs بعد تثبيتها:
+```bash
+kubectl get crd \
+  gatewayclasses.gateway.networking.k8s.io \
+  gateways.gateway.networking.k8s.io \
+  httproutes.gateway.networking.k8s.io \
+  referencegrants.gateway.networking.k8s.io \
+  tlsroutes.gateway.networking.k8s.io \
+  grpcroutes.gateway.networking.k8s.io
+  ```
+
+📌 تأكد إن Cilium متثبت ومفعّل بالـ Gateway API:
+```bash
+cilium config view | grep -w "enable-gateway-api"
+```
+
+---
+
+طبعًا، هنزبطها بشكل جذاب مع الألوان والصواريخ:
+
+---
+
+### 🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🥇 **استخدامات متقدمة لـ Gateway API** 🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀
+
+---
+
+### 🚀 **استخدامات متقدمة لـ Gateway API**
+
+قبل ما نقدر ننزل **Cilium** مع ميزة **Gateway API**، فيه شوية حاجات لازم نعملها الأول:
+
+1. ال**Cilium** لازم يكون متكوّن بإعداد **kubeProxyReplacement** على **true**.
+   - 🛠️ **ده معناه** إنك لازم تفعل خاصية الاستبدال بتاعت **kube-proxy** في **Cilium**، واللي بتحسّن الأداء وبتسهل إدارة الشبكة.
+
+2. لازم يكون فيه **CRDs** من **Gateway API** متسطبة قبل كده.
+   - 📋 **دي بتكون تعريفات** خاصة بالـ **Gateway API**، وبتبقى ضرورية قبل ما تنزل **Cilium**.
+
+### 🔍 **ازاي نتأكد من وجود CRDs؟**
+
+عشان نتأكد إن الموارد دي موجودة في الكلاستر بتاعك، استخدم الكوماند ده:
+
+```bash
+kubectl get crd \
+  gatewayclasses.gateway.networking.k8s.io \
+  gateways.gateway.networking.k8s.io \
+  httproutes.gateway.networking.k8s.io \
+  referencegrants.gateway.networking.k8s.io \
+  tlsroutes.gateway.networking.k8s.io \
+  grpcroutes.gateway.networking.k8s.io
+```
+
+#### 🛠️ **امتنساش تنصيب Cilium باستخدام الفلاجز دي:**
+
+```bash
+--set kubeProxyReplacement=true \
+--set gatewayAPI.enabled=true
+```
+
+- 💡 **دي معناها** إنك فعلت خاصية الاستبدال بتاعت **kube-proxy** وفعلت مميزات **Gateway API** في **Cilium**.
+
+### ✅ **ازاي نتأكد إن Cilium شغال صح؟**
+
+استخدم الكوماند ده عشان تتأكد إن **Cilium** شغال مظبوط:
+
+```bash
+cilium status --wait
+```
+
+- ⏳ **الكوماند ده هيستنى** لحد ما **Cilium** يبقى شغال ويبلغك بحالته.
+
+### 🧩 **ازاي نتأكد إن Cilium متفعل مع مميزات Gateway API؟**
+
+تقدر تستخدم الكوماند ده عشان تشوف إذا كان **Cilium** متسطب مع مميزات **Gateway API**:
+
+```bash
+cilium config view | grep -w "enable-gateway-api "
+```
+
+### 🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🥇 **استخدامات متقدمة لـ Gateway API** 🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀
+
+---
+
+#### 📌 نشر التطبيق التجريبي
+
+1. **افتح ملف `echoserver.yml`:**
+
+   ```yaml
+   apiVersion: v1
+   kind: Service
+   metadata:
+     labels:
+       app: echo-1
+     name: echo-1
+   spec:
+     ports:
+     - port: 8080
+       name: high
+       protocol: TCP
+       targetPort: 8080
+     selector:
+       app: echo-1
+   ---
+   apiVersion: apps/v1
+   kind: Deployment
+   metadata:
+     labels:
+       app: echo-1
+     name: echo-1
+   spec:
+     replicas: 1
+     selector:
+       matchLabels:
+         app: echo-1
+     template:
+       metadata:
+         labels:
+           app: echo-1
+       spec:
+         containers:
+         - image: gcr.io/kubernetes-e2e-test-images/echoserver:2.2
+           name: echo-1
+           ports:
+           - containerPort: 8080
+           env:
+             - name: NODE_NAME
+               valueFrom:
+                 fieldRef:
+                   fieldPath: spec.nodeName
+             - name: POD_NAME
+               valueFrom:
+                 fieldRef:
+                   fieldPath: metadata.name
+             - name: POD_NAMESPACE
+               valueFrom:
+                 fieldRef:
+                   fieldPath: metadata.namespace
+             - name: POD_IP
+               valueFrom:
+                 fieldRef:
+                   fieldPath: status.podIP
+   ```
+
+   - هنا بنحدد إزاي ننشر تطبيق تجريبي. 
+   - هننشر بودز وخدمه اسمها `echo-1`.
+
+2. **شغل الأمر:**
+
+   ```bash
+   kubectl apply -f echoserver.yml
+   ```
+
+   - ده هينشر التطبيق التجريبي على الكلاستر بتاعك.
+
+---
+
+#### 📌 نشر الـ Gateway والـ HTTPRoute
+
+1. **افتح ملف `gateway.yaml`:**
+
+   ```yaml
+   apiVersion: gateway.networking.k8s.io/v1beta1
+   kind: Gateway
+   metadata:
+     name: cilium-gw
+   spec:
+     gatewayClassName: cilium
+     listeners:
+     - protocol: HTTP
+       port: 80
+       name: web-gw-echo
+       allowedRoutes:
+         namespaces:
+           from: Same
+   ```
+
+   - هنا بنحدد الـ Gateway اللي هتكون النقطة اللي الترافيك هيدخل منها.
+
+2. **افتح ملف `http-route.yml`:**
+
+   ```yaml
+   apiVersion: gateway.networking.k8s.io/v1beta1
+   kind: HTTPRoute
+   metadata:
+     name: example-route-1
+   spec:
+     parentRefs:
+     - name: cilium-gw
+     rules:
+     - matches:
+       - path:
+           type: PathPrefix
+           value: /echo
+       backendRefs:
+       - kind: Service
+         name: echo-1
+         port: 8080
+   ```
+
+   - هنا بنحدد إزاي الترافيك هيتوجه من الـ Gateway للخدمات.
+
+3. **شغل الأمر لنشر الـ Gateway والـ HTTPRoute:**
+
+   ```bash
+   kubectl apply -f gateway.yaml -f http-route.yml
+   ```
+
+   - ده هينشر الـ Gateway والـ HTTPRoute على الكلاستر.
+
+---
+
+#### 📌 إنشاء خدمة LoadBalancer للـ Gateway
+
+1. **عمل خدمة LoadBalancer:**
+
+   - بعد ما ننشر الـ Gateway، Kubernetes هينشئ خدمة LoadBalancer جديدة تستقبل الترافيك من الخارج.
+
+---
+
+#### 📌 الحصول على عنوان IP للـ Gateway
+
+1. **احصل على عنوان IP:**
+
+   ```bash
+   GATEWAY=$(kubectl get gateway cilium-gw -o jsonpath='{.status.addresses[0].value}')
+   echo $GATEWAY
+   ```
+
+   - ده هياخد عنوان IP اللي اتعين للـ Gateway ويخزنه في متغير اسمه `GATEWAY`.
+
+---
+
+#### 📌 التحقق من توجيه الترافيك
+
+1. **تأكد من التوجيه:**
+
+   ```bash
+   curl --fail -s http://$GATEWAY/echo
+   ```
+
+   - ده هيتأكد إن الـ Gateway بيوجه الترافيك بشكل صحيح للخدمات.
+
+---
+
+### ملخص
+
+بعد ما تعمل الخطوات دي:
+1. هتنشر البودز والخدمات للتطبيق التجريبي.
+2. هتعمل Gateway جديد لتوجيه الترافيك الخارجي.
+3. هتحدد HTTPRoute لتوجيه الترافيك من الـ Gateway للخدمات.
+4. هتحصل على عنوان IP خارجي للـ Gateway.
+5. هتتحقق من إن الـ Gateway بيوجه الترافيك بشكل صحيح للخدمات.
+
+---
+
+
+---
+
+# 🚀 **تطبيق Gateway API وتجربة التعديل على HTTP Headers**
+
+## 🛠️ **نشر التطبيق التجريبي**
+
+أول خطوة هنعملها هي نشر تطبيق تجريبي اسمه `echo-1`. هنبدأ بملف YAML اللي هيساعدنا نعمل الخدمة والبود الخاص بالتطبيق.
+
+### 📌 **ملف `echoserver.yml`**
+
+```yaml
+---
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    app: echo-1
+  name: echo-1
+spec:
+  ports:
+  - port: 8080
+    name: high
+    protocol: TCP
+    targetPort: 8080
+  selector:
+    app: echo-1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: echo-1
+  name: echo-1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: echo-1
+  template:
+    metadata:
+      labels:
+        app: echo-1
+    spec:
+      containers:
+      - image: gcr.io/kubernetes-e2e-test-images/echoserver:2.2
+        name: echo-1
+        ports:
+        - containerPort: 8080
+        env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          - name: POD_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.name
+          - name: POD_NAMESPACE
+            valueFrom:
+              fieldRef:
+                fieldPath: metadata.namespace
+          - name: POD_IP
+            valueFrom:
+              fieldRef:
+                fieldPath: status.podIP
+```
+
+### 📋 **الخطوات:**
+
+1. **نشر التطبيق:**
+   ```bash
+   kubectl apply -f echoserver.yml
+   ```
+
+   بعد ما تنفذ الكوماند ده:
+   - Kubernetes هيبدأ ينشر البودز والخدمات الخاصة بـ `echo-1`.
+   - البودز هتبدأ تتعمل وتشتغل.
+   - الخدمات هتخلي البودز يتواصلوا مع بعض ومع العالم الخارجي.
+
+## 🌐 **نشر Gateway و HTTPRoute**
+
+المرحلة دي هنعمل فيها Gateway و HTTPRoute، اللي هيحددوا إزاي الترافيك هيتوجه للخدمات.
+
+### 📌 **ملف `gateway.yaml`**
+
+```yaml
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: cilium-gw
+spec:
+  gatewayClassName: cilium
+  listeners:
+  - protocol: HTTP
+    port: 80
+    name: web-gw-echo
+    allowedRoutes:
+      namespaces:
+        from: Same
+```
+
+### 📌 **ملف `http-route.yml`**
+
+```yaml
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: example-route-1
+spec:
+  parentRefs:
+  - name: cilium-gw
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /echo
+    backendRefs:
+    - kind: Service
+      name: echo-1
+      port: 8080
+```
+
+### 📋 **الخطوات:**
+
+1. **نشر الـ Gateway و الـ HTTPRoute:**
+   ```bash
+   kubectl apply -f gateway.yaml -f http-route.yaml
+   ```
+
+   بعد ما تنفذ الكوماند ده:
+   - Kubernetes هينشئ Gateway جديد و HTTPRoute جديدة.
+   - الـ Gateway هيسمح للترافيك إنه يدخل للكلاستر.
+   - الـ HTTPRoute هتحدد إزاي الترافيك اللي جاي للـ Gateway هيتوجه للخدمات الداخلية.
+
+## 💥 **إنشاء خدمة LoadBalancer للـ Gateway**
+
+بعد ما نعمل Gateway، Kubernetes هيعمل خدمة من نوع LoadBalancer عشان يستقبل الترافيك من خارج الكلاستر ويوجهه للخدمات الداخلية.
+
+### 📋 **الخطوات:**
+
+1. **الحصول على عنوان IP للـ Gateway:**
+   ```bash
+   GATEWAY=$(kubectl get gateway cilium-gw -o jsonpath='{.status.addresses[0].value}')
+   echo $GATEWAY
+   ```
+
+   - الكوماند ده هيجيب لك عنوان الـ IP الخاص بالـ Gateway.
+
+2. **التحقق من التوجيه:**
+   ```bash
+   curl --fail -s http://$GATEWAY/echo
+   ```
+
+   - هنا هتبعت طلب HTTP للـ IP الخارجي للـ Gateway.
+   - الـ Gateway هيوجه الطلب للخدمة `echo-1`.
+
+## 🛠️ **تعديل HTTP Headers**
+
+هنستخدم Cilium Gateway API لتعديل HTTP Headers في الطلبات.
+
+### 📌 **ملف `echo-header-http-route.yaml`**
+
+```yaml
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: header-http-echo
+spec:
+  parentRefs:
+  - name: cilium-gw
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /cilium-add-a-request-header
+    filters:
+    - type: RequestHeaderModifier
+      requestHeaderModifier:
+        add:
+        - name: my-cilium-header-name
+          value: my-cilium-header-value
+    backendRefs:
+    - name: echo-1
+      port: 8080
+```
+
+### 📋 **الخطوات:**
+
+1. **نشر التعديلات:**
+   ```bash
+   kubectl apply -f echo-header-http-route.yaml
+   ```
+
+2. **التحقق من التعديلات:**
+   ```bash
+   curl --fail -s http://$GATEWAY/cilium-add-a-request-header
+   ```
+
+   - هتلاحظ إن الهيدرز تم تعديلها في الطلبات الواردة.
+
+## 👁️ **مراقبة الحركة باستخدام Hubble (اختياري)**
+
+Hubble هي أداة لمراقبة حركة الترافيك في Cilium.
+
+### 📋 **الخطوات:**
+
+1. **Forward للمنفذ لـ Hubble:**
+   ```bash
+   cilium hubble port-forward &
+   ```
+
+2. **مراقبة الحركة:**
+   ```bash
+   hubble observe --http-path "/cilium-add-a-request-header"
+   ```
+
+   - هتلاحظ حركة الترافيك وتأكد من إن التعديلات اللي عملتها شغالة بشكل صحيح.
+
+---
+
+**ملخص:**
+- نشرنا تطبيق تجريبي.
+- أنشأنا Gateway و HTTPRoute لتوجيه الترافيك.
+- استخدمنا LoadBalancer لاستقبال الترافيك الخارجي.
+- قمنا بتعديل HTTP Headers باستخدام Cilium Gateway API.
+- استخدمنا Hubble لمراقبة الحركة (اختياري).
+
+---
+
+لو عندك أي استفسار أو تحتاج مساعدة، أنا هنا! 🚀
