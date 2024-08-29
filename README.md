@@ -1281,6 +1281,8 @@ cilium status --wait
 cilium config view | grep -w "enable-gateway-api "
 ```
 
+
+
 ### 🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🥇 **استخدامات متقدمة لـ Gateway API** 🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀🚀
 
 ---
@@ -1459,6 +1461,10 @@ cilium config view | grep -w "enable-gateway-api "
 
 
 ---
+
+
+
+
 
 # 🚀 **تطبيق Gateway API وتجربة التعديل على HTTP Headers**
 
@@ -1699,7 +1705,10 @@ Hubble هي أداة لمراقبة حركة الترافيك في Cilium.
 
 
 
-🚀 تطبيق Gateway API تعديل الـ HTTP Response Headers
+
+
+
+### 🚀 **تطبيق Gateway API: تعديل الـ HTTP Response Headers** 🚀
 
 ### 📒 **تعديل الـ HTTP Response Headers: ليه وإزاي؟**
 
