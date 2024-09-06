@@ -1800,3 +1800,1490 @@ Hubble هي أداة لمراقبة حركة الترافيك في Cilium.
    ```
 
 ده كله بيساعدك تضمن إن البيانات اللي بترجع من السيرفر بتكون مناسبة لاحتياجاتك، سواء لتتبع المستخدمين أو لتوفير معلومات إضافية للفرونت إند.
+
+##HOL:-
+
+
+الحل ده بيغطي تجربة تعديل الـ HTTP response headers باستخدام Cilium Gateway API. الفكرة هي إنك تقدر تعدل في الـ response headers بنفس الطريقة اللي ممكن تعدل بيها في الـ request headers، وده بيساعد في حاجات زي إضافة أو إزالة cookies لباك إند معين أو تمييز الـ backend إذا كان stable أو beta.
+
+### الخطوات اللي تمت:
+
+1. **تطبيق HTTPRoute لتعديل الـ Response Headers:**
+ 
+
+     ```yaml
+     apiVersion: gateway.networking.k8s.io/v1beta1
+     kind: HTTPRoute
+     metadata:
+       name: response-header-modifier
+     spec:
+       parentRefs:
+         - name: cilium-gw
+       rules:
+         - matches:
+             - path:
+                 type: PathPrefix
+                 value: /multiple
+           filters:
+             - type: ResponseHeaderModifier
+               responseHeaderModifier:
+                 add:
+                   - name: X-Header-Add-1
+                     value: header-add-1
+                   - name: X-Header-Add-2
+                     value: header-add-2
+                   - name: X-Header-Add-3
+                     value: header-add-3
+           backendRefs:
+             - name: echo-1
+               port: 8080
+     ```
+
+   - هنا الـ HTTPRoute مربوط بـ Gateway اسمها `cilium-gw`، والـ rule بتطبق تعديل في الـ headers لما الـ path يبتدي بـ `/multiple`.
+
+2. **الحصول على عنوان الـ Gateway:**
+   - استخدمت الأمر ده عشان أجيب الـ IP الخاص بالـ Gateway:
+
+     ```bash
+     GATEWAY=$(kubectl get gateway cilium-gw -o jsonpath='{.status.addresses[0].value}')
+     echo $GATEWAY
+     ```
+
+   - الناتج كان IP: `172.18.255.200`.
+
+3. **اختبار إرسال طلب HTTP للـ Gateway:**
+   - استخدمت curl للتأكد من إنك تقدر تبعت طلب HTTP للـ Gateway:
+
+     ```bash
+     curl --fail -s http://$GATEWAY/multiple
+     ```
+
+   - النتيجة كانت معلومات عن البود المستهدفة `echo-1` زي اسمها، IP، والـ server details.
+
+4. **عرض الـ Response Headers:**
+   - استخدمت curl في وضع verbose عشان تشوف الـ response headers:
+
+     ```bash
+     curl -v --fail -s http://$GATEWAY/multiple
+     ```
+
+   - في الـ response headers لاحظت إضافة الـ headers اللي تم تعديلها باستخدام الـ HTTPRoute:
+     ```
+     < x-header-add-1: header-add-1
+     < x-header-add-2: header-add-2
+     < x-header-add-3: header-add-3
+     ```
+
+الخطوات دي بتوضح كيفية تعديل الـ response headers باستخدام Gateway API، وده بيديك مرونة أكتر في التحكم في الاستجابات الخاصة بالـ backend services. تقدر تستخدم المثال ده في سيناريوهات كتير زي التوجيه المشروط أو التخصيص للـ headers بناءً على الـ requests أو الـ backends.
+
+
+-----------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------
+
+
+
+
+## 🚀 HTTP Traffic Mirroring Used by Cilium Gateway API 🚀
+
+الميزة اللي بتقدمها الـ Cilium Gateway API في الـ "mirroring" هي إنك تقدر تنسخ الترافيك اللي رايح لسيرفر معين (backend) وتوجه نسخة منه لسيرفر تاني. دا بيبقى مفيد لو عايز تختبر نسخة جديدة من الخدمة أو عشان تحلل الترافيك وتعرف المشاكل. يعني لو عندك نسخة V1 شغالة وعملت V2 عايز تجربها، ممكن تروح نسخ الترافيك ليها عشان تتأكد إنها تمام.
+
+#### 🛠️ الخطوات بالأمثلة:
+
+1. **تعريف الـ Backends:**
+
+ yq demo-app.yaml
+```yaml
+# Kubernetes Deployment and Service definitions for infra-backend-v1 and infra-backend-v2
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infra-backend-v1
+  labels:
+    app: infra-backend-v1
+spec:
+  selector:
+    app: infra-backend-v1
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infra-backend-v1
+  labels:
+    app: infra-backend-v1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infra-backend-v1
+  template:
+    metadata:
+      labels:
+        app: infra-backend-v1
+    spec:
+      containers:
+        - name: infra-backend-v1
+          image: gcr.io/k8s-staging-ingressconformance/echoserver:v20221109-7ee2f3e
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          resources:
+            requests:
+              cpu: 10m
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: infra-backend-v2
+  labels:
+    app: infra-backend-v2
+spec:
+  selector:
+    app: infra-backend-v2
+  ports:
+    - protocol: TCP
+      port: 8080
+      targetPort: 3000
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: infra-backend-v2
+  labels:
+    app: infra-backend-v2
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: infra-backend-v2
+  template:
+    metadata:
+      labels:
+        app: infra-backend-v2
+    spec:
+      containers:
+        - name: infra-backend-v2
+          image: gcr.io/k8s-staging-ingressconformance/echoserver:v20221109-7ee2f3e
+          env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+          resources:
+            requests:
+              cpu: 10m
+```
+📌root@server:~# kubectl get -f demo-app.yaml
+NAME                       TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+service/infra-backend-v1   ClusterIP   10.96.203.120   <none>        8080/TCP   4m54s
+
+NAME                               READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/infra-backend-v1   1/1     1            1           4m54s
+
+NAME                       TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)    AGE
+service/infra-backend-v2   ClusterIP   10.96.247.211   <none>        8080/TCP   4m54s
+
+NAME                               READY   UP-TO-DATE   AVAILABLE   AGE
+deployment.apps/infra-backend-v2   1/1     1            1           4m54s
+
+2. **تفعيل الـ Mirroring:**
+   - هنا هنضيف في الـ HTTPRoute الخاصية اللي هتنسخ الترافيك.
+     
+
+    ```yaml
+    apiVersion: gateway.networking.k8s.io/v1beta1
+    kind: HTTPRoute
+    metadata:
+      name: request-mirror
+    spec:
+      parentRefs:
+      - name: cilium-gw
+      rules:
+      - matches:
+        - path:
+            type: PathPrefix
+            value: /mirror
+        filters:
+         - type: RequestMirror
+           requestMirror:
+             backendRef:
+               name: infra-backend-v2
+               port: 8080
+        backendRefs:
+        - name: infra-backend-v1
+          port: 8080
+    ```
+root@server:~# GATEWAY=$(kubectl get gateway cilium-gw -o jsonpath='{.status.addresses[0].value}')
+echo $GATEWAY
+172.18.255.200
+root@server:~# 
+
+📎Make a request to the gateway:
+
+📌curl -s http://$GATEWAY/mirror | jq
+
+📎Check the >_ 📜 Backend Logs tab. This tab watches the access logs for both infra-backend-v1 and infra-backend-v2 pods.
+
+📌kubectl logs -f deploy/infra-backend-v1 
+📌kubectl logs -f deploy/infra-backend-v2
+
+
+🪞 Deploy the mirrored route
+Using the </> Editor, edit the http-mirror-route.yaml manifest and uncomment the filters section (lines 14-19) in the manifest, then apply it in the >_ Terminal:
+
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: request-mirror
+spec:
+  parentRefs:
+  - name: cilium-gw
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /mirror
+    filters:
+     - type: RequestMirror
+       requestMirror:
+         backendRef:
+           name: infra-backend-v2
+           port: 8080
+    backendRefs:
+    - name: infra-backend-v1
+      port: 8080
+
+📌kubectl apply -f http-mirror-route.yaml
+
+📎Make a new request to the gateway:
+
+curl -s http://$GATEWAY/mirror | jq
+
+Has the mirroring actually happened?
+
+Check the >_ 📜 Backend Logs tab again.
+
+You will see logs on both sides of the split screen, showing that the traffic was indeed mirrored.
+
+Press Check to move on to the next task, where you will be rewriting the HTTP URL.
+
+
+الجزء ده في ملف الـ YAML بيستخدم لإعداد خاصية "mirroring" للترافيك باستخدام Cilium Gateway API. خلينا نشرح كل جزء بالتفصيل:
+
+### الشرح
+
+filters:
+ - type: RequestMirror
+   requestMirror:
+     backendRef:
+       name: infra-backend-v2
+       port: 8080
+
+- `filters:`:
+  - القسم ده بيحدد الفلاتر اللي هتطبق على الترافيك الداخل. الفلاتر دي بتكون مسؤولة عن تعديل الترافيك، سواء بإضافة هيدر، أو إجراء تغييرات أخرى، أو حتى تنفيذ Mirroring.
+
+- `type: RequestMirror`:
+  - هنا بنحدد نوع الفلتر. النوع RequestMirror يعني أن الفلتر هيقوم بعمل "mirroring" للترافيك. بمعنى آخر، الترافيك اللي رايح لـ backend الأساسي هيتنسخ ويتوجه أيضاً إلى backend إضافي.
+
+- `requestMirror:`:
+  - تحت هذا القسم، بنحدد التفاصيل الخاصة بعملية المرايا.
+
+- `backendRef:`:
+  - ده يشير إلى الـ backend اللي هيستقبل نسخة من الترافيك. في الحالة دي، الترافيك هيكون موجه لـ infra-backend-v2 على المنفذ 8080.
+
+- `name: infra-backend-v2`:
+  - اسم الـ backend اللي هيستقبل نسخة من الترافيك. في الحالة دي، هو infra-backend-v2.
+
+- `port: 8080`:
+  - المنفذ اللي هيتم إرسال الترافيك عليه في الـ backend infra-backend-v2.
+
+### الجزء التالي
+
+backendRefs:
+- name: infra-backend-v1
+  port: 8080
+
+- `backendRefs:`:
+  - هنا بنحدد الـ backends اللي هيستقبلوا الترافيك الأصلي. الترافيك مش هيتوجه بس للـ backend اللي معمول له Mirroring، لكن كمان للـ backend الرئيسي.
+
+- `name: infra-backend-v1`:
+  - اسم الـ backend اللي هيتلقى الترافيك الأساسي. في الحالة دي، هو infra-backend-v1.
+
+- `port: 8080`:
+  - المنفذ اللي هيتم إرسال الترافيك عليه في الـ backend infra-backend-v1.
+
+### في النهاية
+
+الـ filters هنا بتعمل عملية "mirroring" للترافيك، بمعنى أن الترافيك اللي متوجه لـ infra-backend-v1 هيتنسخ ويروح كمان لـ infra-backend-v2. العملية دي مفيدة جداً لاختبار التغييرات أو لعمل تحليل للترافيك بدون التأثير على الـ backend الأساسي. 
+
+
+3. **تجربة Mirroring:**
+   - جبنا الـ IP الخاص بالـ Gateway.
+   - بعدها بنعمل curl على الـ `/mirror` path.
+   - هنشوف الترافيك بيتوجه للـ `infra-backend-v1` وكمان للـ `infra-backend-v2`.
+
+    ```bash
+    GATEWAY=$(kubectl get gateway cilium-gw -o jsonpath='{.status.addresses[0].value}')
+    curl -s http://$GATEWAY/mirror | jq
+    ```
+
+4. **تشوف اللوجز:**
+   - افتح اللوجز بتاعة الباك إند الأولاني (`infra-backend-v1`) والتاني (`infra-backend-v2`)، هتلاقي الترافيك متنسخ للاتنين.
+   
+    ```bash
+    kubectl logs -f deploy/infra-backend-v1 
+    kubectl logs -f deploy/infra-backend-v2
+    ```
+
+### 🤔 الفايدة من الموضوع ده:
+- **تجربة حاجات جديدة**: تقدر تختبر خدمة جديدة من غير ما تأثر على المستخدمين.
+- **تحليل الأداء والمشاكل**: تقدر تجمع بيانات وتعمل تحليلات من غير ما تأثر على الأصل.
+
+يعني باختصار، حتة Mirroring دي جامدة عشان تقدر تجرب حاجات جديدة بأمان 🚀😎!
+
+------------------------------------------------------------------------------------------------------------
+---------------------------------------------------------------------------------------------------------------------------------------------------------
+
+## 🚀HTTP URL Rewrite Used by Cilium Gateway API 🚀
+
+💥🚀✨ **إعادة كتابة HTTP URL باستخدام Cilium Gateway API** ✨🚀💥
+
+في التحدي اللي قدامنا ده، هنستخدم خاصية الـ **Cilium Gateway API** علشان نعيد كتابة الـ URL اللي بيستخدمه الترافيك في الـ HTTP. الفكرة ببساطة هي إننا نغير الـ URL اللي العميل بيطلبه قبل ما نوصله للخادم (الـ Backend) اللي عايزين نوصلهوله. الموضوع ده بيبقى ليه فوائد كتير، زي:
+
+🚀 **ليه بنعمل إعادة كتابة للـ URL؟**
+1. **توجيه الترافيك لمسار مختلف**: تخيل إن عندك أكتر من تطبيق وكل واحد على مسار مختلف، لو عايز تبعت الترافيك بتاع الـ URL معين لتطبيق معين، إعادة كتابة الـ URL هتساعدك توصل للهدف ده.
+   
+2. **إخفاء التفاصيل الداخلية للمسارات**: لو المسارات الداخلية للخوادم عندك مش زي اللي العميل بيشوفها، إعادة كتابة الـ URL بتساعدك إنك تخلي الأمور منظمة وتخفي التفاصيل الداخلية.
+
+3. **تطبيق قواعد للتوجيه**: ممكن توجه الترافيك بناءً على شروط معينة، زي الباراميترز في الـ URL أو أي حاجة تانية.
+
+✨ **إزاي بنعمل إعادة كتابة للـ URL؟**
+هناخد مثال بسيط نشرح بيه الفكرة: 
+
+هنعيد كتابة URL معين علشان يكون مناسب للـ backend بتاعنا:
+
+📝 **خطوات**:
+
+1. **إنشاء ملف الـ YAML**: هنبدأ نكتب إعدادات إعادة كتابة الـ URL في الملف ده.
+
+    ```yaml
+    ---
+    apiVersion: gateway.networking.k8s.io/v1beta1
+    kind: HTTPRoute
+    metadata:
+      name: rewrite-path
+    spec:
+      parentRefs:
+        - name: cilium-gw
+      rules:
+        - matches:
+            - path:
+                type: PathPrefix
+                value: /prefix/one
+          filters:
+            - type: URLRewrite
+              urlRewrite:
+                path:
+                  type: ReplacePrefixMatch
+                  replacePrefixMatch: /one
+          backendRefs:
+            - name: infra-backend-v1
+              port: 8080
+    ```
+
+2. **تطبيق ملف الـ YAML باستخدام kubectl**:
+
+    📌 أمر التطبيق:
+    ```bash
+    kubectl apply -f http-rewrite-route.yaml
+    ```
+    ✅ هتلاقي إنه عمل إنشاء للـ HTTPRoute اللي محتاجينه:
+    ```
+    httproute.gateway.networking.k8s.io/rewrite-path created
+    ```
+
+3. **اختبار إعادة كتابة الـ URL**:
+
+    📌 نستخدم curl ونشوف النتيجة:
+    ```bash
+    GATEWAY=$(kubectl get gateway cilium-gw -o jsonpath='{.status.addresses[0].value}')
+    curl -s http://$GATEWAY/prefix/one | jq
+    ```
+
+    ✅ النتيجة هتكون:
+    ```json
+    {
+      "path": "/one",
+      "host": "172.18.255.200",
+      "method": "GET",
+      "proto": "HTTP/1.1",
+      "headers": {
+        "Accept": [
+          "*/*"
+        ],
+        "User-Agent": [
+          "curl/8.5.0"
+        ],
+        "X-Envoy-Internal": [
+          "true"
+        ],
+        "X-Envoy-Original-Path": [
+          "/prefix/one"
+        ],
+        "X-Forwarded-For": [
+          "172.18.0.1"
+        ],
+        "X-Forwarded-Proto": [
+          "http"
+        ],
+        "X-Request-Id": [
+          "a2bc4ea4-a1d9-453d-a9bd-18fe414352ba"
+        ]
+      },
+      "namespace": "default",
+      "ingress": "",
+      "service": "",
+      "pod": "infra-backend-v1-8558ddcc55-db2fb"
+    }
+    ```
+
+🚀💥 بكده، الـ URL بيتغير من `/prefix/one` إلى `/one` زي ما عايزين، والترافيك بيروح للمكان الصحيح🚀💥
+
+-------------------------------------------------------------------------------------------------------------------------------------------
+-------------------------------------------------------------------------------------------------------------------------------------------
+
+ ## 🚀HTTP Traffic Redirect Used by Cilium Gateway API 🚀
+
+ 🚀🚀🚀
+---
+
+📒📒📒📒📒📒📒📒📒📝 **إعادة توجيه ترافيك HTTP**  
+في التحدي ده، هنحول الترافيك من URL لآخر باستخدام Cilium Gateway API. 
+
+ممكن تتحكم في الـ path، والـ hostname، وكود إعادة التوجيه (زي 301 أو 302) في الرسائل بتاعتك.  
+ده بيفيد في حالة التحويل المؤقت أو الدائم للتطبيق. 📒📒📒📒📒
+
+---
+
+## يعني إيه إعادة توجيه الترافيك HTTP؟
+
+لما بنقول "إعادة توجيه الترافيك" (Redirect)، يعني إنك بتعمل تحويل لأي طلب (Request) جاي على رابط (URL) معين لرابط تاني. مثلا، لو عندك موقع قديم وعايز تحوّل الزوار لموقع جديد تلقائيًا. 🚀
+
+### مثال بسيط 🎯
+
+افترض إن عندك موقع ويب قديم على الرابط `/old-path`، وعايز تحول كل اللي بيزوروا الرابط ده لرابط جديد زي `/new-path`.  
+ده هيتم عن طريق إعداد "إعادة توجيه" في Cilium Gateway API.
+
+### خطوات الإعداد:
+
+1. أول خطوة بتكون تطبيق الـ YAML file زي كده:
+
+   ```bash
+   root@server:~# kubectl apply -f redirect-route.yaml
+   ```
+
+   بعد ما تطبق الملف ده، هيظهرلك حاجة زي كده:
+
+   ```bash
+   httproute.gateway.networking.k8s.io/redirect-path created
+   ```
+
+2. نراجع محتوى الملف:
+
+   ```bash
+   root@server:~# yq redirect-route.yaml
+   ```
+
+   هتلاقي محتوى الـ YAML كالتالي:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: redirect-path
+spec:
+  parentRefs:
+    - name: cilium-gw
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /original-prefix
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /replacement-prefix
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /path-and-host
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            hostname: example.org
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /replacement-prefix
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /path-and-status
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /replacement-prefix
+            statusCode: 301
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /scheme-and-host
+      filters:
+        - type: RequestRedirect
+          requestRedirect:
+            hostname: example.org
+            scheme: "https"
+```
+
+3. هنشرح كل جزء من الـ YAML:
+
+   - ال**apiVersion**: بتمثل نسخة الـ API اللي بنستخدمها لتكوين HTTPRoute.
+   - ال**kind**: نوع المورد، هنا هو HTTPRoute.
+   - ال**metadata**: معلومات زي اسم الـ HTTPRoute (هنا اسمه `redirect-path`).
+   - ال**spec**: ده فيه تفاصيل التوجيه والقواعد.
+   - ال**parentRefs**: بيحدد الـ Gateway اللي هيتطبق عليه القواعد (هنا `cilium-gw`).
+   - ال**rules**: فيها القواعد اللي هتتطبق على الترافيك اللي جاي.
+
+### القواعد بالتفصيل 📝:
+
+**القاعدة الأولى:**
+🔀 HTTP Path Redirect
+```yaml
+- matches:
+  - path:
+      type: PathPrefix
+      value: /original-prefix
+  filters:
+  - type: RequestRedirect
+    requestRedirect:
+      path:
+        type: ReplacePrefixMatch
+        replacePrefixMatch: /replacement-prefix
+```
+```yaml
+matches:
+  path: بيطابق الطلبات اللي بتبدأ بـ /original-prefix.
+filters:
+  type: RequestRedirect: الفلتر ده بيعمل إعادة توجيه.
+requestRedirect:
+  path:
+    type: ReplacePrefixMatch: بيستبدل البادئة /original-prefix بـ /replacement-prefix.
+```
+
+---
+
+**القاعدة التانية:**
+✨ Redirect to new hostname and new prefix
+```yaml
+- matches:
+  - path:
+      type: PathPrefix
+      value: /path-and-host
+  filters:
+  - type: RequestRedirect
+    requestRedirect:
+      hostname: example.org
+      path:
+        type: ReplacePrefixMatch
+        replacePrefixMatch: /replacement-prefix
+```
+```yaml
+matches:
+  path: بيطابق الطلبات اللي بتبدأ بـ /path-and-host.
+filters:
+  hostname: example.org: بيحوّل الطلبات لـ hostname جديد (example.org).
+  path:
+    type: ReplacePrefixMatch: بيستبدل البادئة /path-and-host بـ /replacement-prefix.
+```
+
+---
+
+**القاعدة التالتة:**
+🔢 Redirect - new status code and new prefix
+```yaml
+- matches:
+  - path:
+      type: PathPrefix
+      value: /path-and-status
+  filters:
+  - type: RequestRedirect
+    requestRedirect:
+      path:
+        type: ReplacePrefixMatch
+        replacePrefixMatch: /replacement-prefix
+      statusCode: 301
+```
+```yaml
+matches:
+  path: بيطابق الطلبات اللي بتبدأ بـ /path-and-status.
+filters:
+  path:
+    type: ReplacePrefixMatch: بيستبدل البادئة /path-and-status بـ /replacement-prefix.
+  statusCode: 301: ده معناه إن إعادة التوجيه هتكون برمز الحالة HTTP 301 (الانتقال الدائم).
+```
+
+---
+
+**القاعدة الرابعة:**
+🔒 Redirect - from HTTP to HTTPS and new prefix
+```yaml
+- matches:
+  - path:
+      type: PathPrefix
+      value: /scheme-and-host
+  filters:
+  - type: RequestRedirect
+    requestRedirect:
+      hostname: example.org
+      scheme: "https"
+```
+```yaml
+matches:
+  path: بيطابق الطلبات اللي بتبدأ بـ /scheme-and-host.
+filters:
+  hostname: example.org: بيحوّل الطلبات لـ hostname جديد (example.org).
+  scheme: "https": بيحدد إن البروتوكول هيكون HTTPS.
+``` 
+
+---
+
+
+
+### ملخص ⚡️:
+
+الـ YAML ده بيحدد إزاي الطلبات اللي بتطابق شروط معينة هتتحول لروابط جديدة أو مضيفين جداد، وده ممكن يشمل تغيير البروتوكول أو كود الحالة. القواعد دي بتساعدك تدير تغييرات المواقع أو التطبيقات بشكل مرن وفعال.
+
+---
+
+دلوقتي ممكن نرجع IP الـ Gateway:
+
+```bash
+GATEWAY=$(kubectl get gateway cilium-gw -o jsonpath='{.status.addresses[0].value}')
+echo $GATEWAY
+```
+
+---
+
+🔀 **HTTP Path Redirect**  
+خلينا نشوف الترافيك اللي مبني على الـ URL path بيتغير إزاي:
+
+```bash
+root@server:~# yq '.spec.rules[0]' redirect-route.yaml
+```
+```yaml
+matches:
+  - path:
+      type: PathPrefix
+      value: /original-prefix
+filters:
+  - type: RequestRedirect
+    requestRedirect:
+      path:
+        type: ReplacePrefixMatch
+        replacePrefixMatch: /replacement-prefix
+```
+بعد كده ممكن تعمل طلب HTTP للعنوان ده:
+
+```bash
+curl -l -v http://$GATEWAY/original-prefix
+```
+
+---
+
+✨ **إعادة توجيه لhostname جديد وprefix جديد**  
+اتأكد إن الترافيك بيبقى متوجه حسب التعديلات في HTTPRoute اللي أنشأناه:
+
+```bash
+root@server:~# yq '.spec.rules[1]' redirect-route.yaml
+```
+
+عملت طلب HTTP للعنوان ده:
+
+```bash
+curl -l -v http://$GATEWAY/path-and-host
+```
+
+### 301 **كود الحالة**
+
+كود 301 (Moved Permanently) معناه إن المورد انتقل بشكل دائم. يعني العميل لازم يستخدم العنوان الجديد في المستقبل.
+
+---
+
+🔒 **إعادة توجيه من HTTP لـ HTTPS وprefix جديد**  
+اتأكد من التوجيه حسب القواعد الموضحة في HTTPRoute:
+
+```bash
+root@server:~# yq '.spec.rules[3]' redirect-route.yaml
+```
+```yaml
+matches:
+  - path:
+      type: PathPrefix
+      value: /scheme-and-host
+filters:
+  - type: RequestRedirect
+    requestRedirect:
+      hostname: example.org
+      scheme: "https"
+```
+عملت طلب HTTP للعنوان ده:
+
+```bash
+curl -l -v http://$GATEWAY/scheme-and-host
+```
+
+---
+
+ 😉🚀
+
+-----------------------------------------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------------------------------
+
+ ## 🚀Cross Namespace Support Used by Cilium Gateway API 🚀
+
+
+---
+
+# 🌐 دعم التوجيه عبر الأسماء (Cross Namespace Support) 🌐
+
+التوجيه عبر الأسماء في **Gateway API** بيسمحلك بربط التوجيهات بين Gateways وNamespaces في Kubernetes. الفكرة هنا هي التحكم المستقل بين أجزاء مختلفة من الكلاستر، مع إمكانية استخدام نفس Gateway إذا لزم الأمر. 
+
+### 📋 ما هو Namespace؟
+
+في Kubernetes، الـ Namespace هو تقسيم للموارد داخل الكلاستر، بيتيح لك فصل الموارد بين الفرق أو المشاريع المختلفة. كل مجموعة من الموارد ممكن تكون في Namespace مختلف.
+
+### 🎯 ليه نحتاج (Cross Namespace Support)؟
+
+1. **التحكم والأمان**:
+   - الفرق المختلفة ممكن تحتاج تتحكم في موارد مختلفة أو قيود وصول مختلفة. باستخدام الأسماء، كل فريق ممكن يدير الموارد الخاصة به بدون تأثير على الآخرين.
+2. **مشاركة البوابة (Gateway)**:
+   - يمكن لعدة فرق استخدام نفس Gateway ولكن مع قواعد مختلفة بناءً على Namespace.
+
+### 💡 كيف تعمل الفكرة؟
+
+#### مثال:
+افترض إن عندك فريقين: فريق A و فريق B، كل فريق في Namespace مختلف. وتريد أن يستخدموا نفس Gateway ولكن مع قواعد مختلفة.
+
+---
+
+### 🚀 السيناريو في شركة ACME
+
+في شركة ACME، لدينا ثلاث فرق وكل فريق يعمل في Namespace خاص به:
+
+1. **فريق التوظيف (Recruiting Team)**: يعمل على تطبيق ويب لعرض الوظائف وتقديم السيرة الذاتية.
+2. **فريق المنتج (Product Team)**: يعمل على تطبيق ويب لعرض معلومات عن المنتجات.
+3. **فريق الموارد البشرية (HR Team)**: يعمل على تطبيق داخلي لإدارة بيانات الموظفين.
+
+#### استخدام Gateway API مشترك
+
+ال**Gateway API** مسؤول عن توجيه الطلبات من الإنترنت إلى التطبيقات الداخلية. هنا، نريد استخدام Gateway مشترك للأشياء العامة فقط مثل تطبيقات التوظيف والمنتج، ولكن لا نريد أن يكون تطبيق الموارد البشرية (HR Team) متاحًا من الإنترنت.
+
+---
+
+### 🛠️ خطوات التنفيذ:
+
+#### 1. إنشاء (Namespaces):
+لدينا أربع مساحات أسماء:
+- **infra-ns**
+- **careers**
+- **product**
+- **hr**
+
+لاحظ أن **careers** و **product** لديهم الملصق `shared-gateway-access=true`، بينما **hr** لا يحتوي على هذا Label.
+
+#### 2. نشر الـ Gateway API و الـ HTTPRoutes:
+نقوم بنشر الـ Gateway API فيNamespace اسم `infra-ns` بحيث يكون موصولاً مع HTTPRoutes من Namespace الأخرى.
+
+```yaml
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: Gateway
+metadata:
+  name: shared-gateway
+  namespace: infra-ns
+spec:
+  gatewayClassName: cilium
+  listeners:
+    - name: shared-http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              shared-gateway-access: "true"
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: cross-namespace
+  namespace: hr
+spec:
+  parentRefs:
+    - name: shared-gateway
+      namespace: infra-ns
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /hr
+      backendRefs:
+        - kind: Service
+          name: echo-hr
+          port: 9080
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: cross-namespace
+  namespace: product
+spec:
+  parentRefs:
+    - name: shared-gateway
+      namespace: infra-ns
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /product
+      backendRefs:
+        - kind: Service
+          name: echo-product
+          port: 9080
+---
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: cross-namespace
+  namespace: careers
+spec:
+  parentRefs:
+    - name: shared-gateway
+      namespace: infra-ns
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /careers
+      backendRefs:
+        - kind: Service
+          name: echo-careers
+          port: 9080
+```
+
+---
+
+### 📌 اختبار الـ HTTPRoutes:
+
+أولاً، نحصل على عنوان IP للـ Gateway:
+
+```bash
+GATEWAY=$(kubectl get gateway shared-gateway -n infra-ns -o jsonpath='{.status.addresses[0].value}')
+echo $GATEWAY
+```
+
+ثم نختبر الخدمات:
+📎Now, let's connect to the product and careers Services:
+
+```bash
+
+
+📌root@server:~# curl -s -o /dev/null -w "%{http_code}\n" http://$GATEWAY/product
+
+200
+
+📌root@server:~# curl -s -o /dev/null -w "%{http_code}\n" http://$GATEWAY/careers
+
+200
+root@server:~#
+
+📌root@server:~# curl -s -o /dev/null -w "%{http_code}\n" http://$GATEWAY/hr
+404
+root@server:~# 
+
+📍It should return a 404. Why?
+
+📍The HTTPRoute in the hr Namespace with a parentRef for infra-ns/shared-gateway would be ignored by the Gateway because the attachment constraint (Namespace label) was not met.
+
+```
+
+#### 📍 يجب أن تكون النتيجة كالتالي:
+
+- ** product and careers**: 200
+- **Hr**: 404
+
+لماذا؟ لأن HTTPRoute في Namespace **hr** مع parentRef لـ `infra-ns/shared-gateway` سيتم تجاهله بواسطة الـ Gateway لأن شرط التثبيت (Namespace label) لم يتم تلبيته.
+
+---
+
+### 🔎 التحقق من حالة الـ HTTPRoutes:
+
+#### 1. التحقق من حالة HTTPRoute لخدمة product  :
+
+```bash
+echo "Product HTTPRoute Status"
+kubectl get httproutes.gateway.networking.k8s.io -n product -o jsonpath='{.items[0].status.parents[0].conditions[0]}' | jq
+```
+- ال`kubectl get httproutes.gateway.networking.k8s.io -n product`: يقوم هذا الأمر بجلب معلومات عن المسارات (HTTPRoutes) في مساحة اسم product.
+- ال`-o jsonpath='{.items[0].status.parents[0].conditions[0]}'`: يحدد أننا نريد استخراج حالة أول مسار في القائمة. في الحالة دى،  نبحث عن حالة الاتصال بالـ Gateway.
+- ال`| jq`: يقوم بتحليل النص الناتج بصيغة JSON لتنسيقه وعرضه بشكل أكثر وضوحًا.
+
+النتيجة المتوقعة: يجب أن تكون الحالة "Accepted HTTPRoute"، مما يعني أن المسار مرتبط بالـ Gateway بشكل صحيح.
+
+#### 2. التحقق من حالة HTTPRoute لخدمةcareers:
+
+```bash
+echo "Careers HTTPRoute Status"
+kubectl get httproutes.gateway.networking.k8s.io -n careers -o jsonpath='{.items[0].status.parents[0].conditions[0]}' | jq
+```
+
+#### 3. التحقق من حالة HTTPRoute لخدمة hr:
+
+```bash
+echo "HR HTTPRoute Status"
+kubectl get httproutes.gateway.networking.k8s.io -n hr -o jsonpath='{.items[0].status.parents[0].conditions[0]}' | jq
+```
+
+نتائج التحقق يجب أن تكون:
+- **خدمة  product and careers**: "Accepted HTTPRoute"
+- **خدمة hr**: "Rejected"
+
+---
+
+💬 🚀🌟
+------------------------------------------------------------------------------------------------------------------
+------------------------------------------------------------------------------------------------------------------
+ ## 🚀⛕ Internal Layer 7 Traffic Management Used by Cilium Gateway API 🚀
+East-West traffic
+بالطبع، سأشرح لك الـ YAML files الخاصة بـ Kubernetes بطريقة مفصلة وباللغة العامية المصرية، وسأستخدم الإيموجي لتوضيح الأمور بشكل أفضل.
+
+---
+
+## **تعريف الـ YAML Files**
+
+### 1. **تعريف Namespace**
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gamma
+```
+
+
+---
+
+### 2. **تعريف Deployment للنسخة الأولى من التطبيق (`echo-v1`)**
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-v1
+  namespace: gamma
+  labels:
+    app: echo
+spec:
+  selector:
+    matchLabels:
+      app: echo
+      version: v1
+  template:
+    metadata:
+      labels:
+        app: echo
+        version: v1
+    spec:
+      containers:
+        - name: echo
+          image: gcr.io/k8s-staging-gateway-api/echo-advanced:v20240412-v1.0.0-394-g40c666fd
+          imagePullPolicy: IfNotPresent
+          args:
+            - --tcp=9090
+            - --port=8080
+            - --grpc=7070
+            - --port=8443
+            - --tls=8443
+            - --crt=/cert.crt
+            - --key=/cert.key
+```
+
+
+---
+
+### 3. **تعريف Service للنسخة الأولى من التطبيق (`echo-v1`)**
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-v1
+  namespace: gamma
+spec:
+  selector:
+    app: echo
+    version: v1
+  ports:
+    - name: http
+      port: 80
+      appProtocol: http
+      targetPort: 8080
+    - name: http-alt
+      port: 8080
+      appProtocol: http
+    - name: https
+      port: 443
+      targetPort: 8443
+    - name: tcp
+      port: 9090
+    - name: grpc
+      port: 7070
+      appProtocol: grpc
+```
+
+🔌 ال**Service** هو وسيلة للوصول للـ Pods من خارجهم أو من داخل الكلاستر. هنا، بنعرف Service باسم `echo-v1` اللي بيوجه الطلبات للـ Pods الخاصة بـ `echo-v1`.
+
+
+---
+
+### 4. **تعريف Deployment للنسخة الثانية من التطبيق (`echo-v2`)**
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo-v2
+  namespace: gamma
+  labels:
+    app: echo
+spec:
+  selector:
+    matchLabels:
+      app: echo
+      version: v2
+  template:
+    metadata:
+      labels:
+        app: echo
+        version: v2
+    spec:
+      containers:
+        - name: echo
+          image: gcr.io/k8s-staging-gateway-api/echo-advanced:v20240412-v1.0.0-394-g40c666fd
+          imagePullPolicy: IfNotPresent
+          args:
+            - --tcp=9090
+            - --port=8080
+            - --grpc=7070
+            - --port=8443
+            - --tls=8443
+            - --crt=/cert.crt
+            - --key=/cert.key
+```
+
+🛠️ ال**Deployment** هنا مشابه للـ Deployment للنسخة الأولى، لكن بنستخدم النسخة الثانية من التطبيق `echo-v2`.
+
+---
+
+### 5. **تعريف Service للنسخة الثانية من التطبيق (`echo-v2`)**
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo-v2
+  namespace: gamma
+spec:
+  selector:
+    app: echo
+    version: v2
+  ports:
+    - name: http
+      port: 80
+      appProtocol: http
+      targetPort: 8080
+    - name: http-alt
+      port: 8080
+      appProtocol: http
+    - name: https
+      port: 443
+      targetPort: 8443
+    - name: tcp
+      port: 9090
+    - name: grpc
+      port: 7070
+      appProtocol: grpc
+```
+
+🔌 ال**Service** هنا مشابه للـ Service للنسخة الأولى، لكن موجهة للنسخة الثانية من التطبيق `echo-v2`.
+
+---
+
+### 6. **تعريف Service عام (`echo`)**
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  namespace: gamma
+spec:
+  selector:
+    app: echo
+  ports:
+    - name: http
+      port: 80
+      appProtocol: http
+      targetPort: 8080
+    - name: http-alt
+      port: 8080
+      appProtocol: http
+    - name: https
+      port: 443
+      targetPort: 8443
+    - name: tcp
+      port: 9090
+    - name: grpc
+      port: 7070
+      appProtocol: grpc
+```
+
+🔌 ال**Service** هنا بتكون شاملة، يعني بتوجه الطلبات لأي Pods تحمل `app: echo`، سواء كانت النسخة `v1` أو `v2`.
+
+---
+
+### 7. **تعريف Pod لـ Client**
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: client
+  namespace: gamma
+spec:
+  containers:
+    - name: netshoot
+      image: nicolaka/netshoot:latest
+      command: ["sleep", "infinite"]
+```
+
+📦 ال**Pod** ده عبارة عن جهاز اختبار، وبيحتوي على حاوية بتقوم بتنفيذ أمر `sleep` بشكل دائم. ممكن تستخدمه لاختبار الشبكة أو الاتصال بالخدمات.
+
+---
+
+### 8. **تعريف HTTPRoute**
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: gamma-route
+  namespace: gamma
+spec:
+  parentRefs:
+    - group: ""
+      kind: Service
+      name: echo
+  rules:
+    - matches:
+        - path:
+            type: Exact
+            value: /v1
+      backendRefs:
+        - name: echo-v1
+          port: 80
+    - matches:
+        - path:
+            type: Exact
+            value: /v2
+      backendRefs:
+        - name: echo-v2
+          port: 80
+```
+##طيب عاوز اعمل LB على الاتنين services دول:
+-  ال LB يتم بشكل متساوي بين echo-v1 و echo-v2 لأن الوزن 50% لكل منهما.
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: load-balancing-route
+  namespace: gamma
+spec:
+  parentRefs:
+    - group: ""
+      kind: Service
+      name: echo
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /load-balancing
+      backendRefs:
+        - kind: Service
+          name: echo-v1
+          port: 80
+          weight: 50
+        - kind: Service
+          name: echo-v2
+          port: 80
+          weight: 50
+```
+🌐 ال**HTTPRoute** ده بيحدد كيفية توجيه الطلبات داخل الكلاستر بناءً على المسارات. في المثال ده، الطلبات على المسار `/v1` بتروح للنسخة `echo-v1`، والطلبات على المسار `/v2` بتروح للنسخة `echo-v2`.
+
+---
+
+🚪 Load-Balance East-West
+## **LoadBalancing**
+
+##طيب عاوز اعمل LB على الاتنين services دول:
+-  ال LB يتم بشكل متساوي بين echo-v1 و echo-v2 لأن الوزن 50% لكل منهما.
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: load-balancing-route
+  namespace: gamma
+spec:
+  parentRefs:
+    - group: ""
+      kind: Service
+      name: echo
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /load-balancing
+      backendRefs:
+        - kind: Service
+          name: echo-v1
+          port: 80
+          weight: 50
+        - kind: Service
+          name: echo-v2
+          port: 80
+          weight: 50
+
+```
+
+ ### 3. التحقق من LB
+
+الأمر:
+kubectl -n gamma exec -it client -- bash -c '
+for _ in {1..500}; do
+  curl -s -k "http://echo/load-balancing" >> curlresponses.txt;
+done
+grep -o "Hostname=echo-v1" curlresponses.txt | sort | uniq -c
+grep -o "Hostname=echo-v2" curlresponses.txt | sort | uniq -c
+'
+
+ما يفعله:
+- يقوم هذا السكربت بإرسال 500 طلب إلى /load-balancing من  client ويجمع الاستجابات في ملف curlresponses.txt.
+- بعد ذلك، يستخدم الأمر grep لحساب عدد الاستجابات التي جاءت من echo-v1 و echo-v2.
+
+نتائج التحقق:
+- تحقق من أن الاستجابات موزعة بشكل متساوي بين echo-v1 و echo-v2. هذا يؤكد أن توازن الحمل يعمل كما هو متوقع.
+
+### ملخص
+
+ هنا نستخدم HTTPRoute لتوجيه حركة المرور داخل الكلاستر (East-West) وتوزيعها بالتساوي بين خدمات متعددة باستخدام الوزن المحدد في التكوين.
+ 
+
+🔢 90/10 Traffic Split
+This time, we will be applying a different weight.
+
+### 1. تطبيق تكوين الـ HTTPRoute
+
+**الأمر:**
+```bash
+kubectl apply -f load-balancing-http-route.yaml
+```
+
+**ما يفعله:**
+- يقوم هذا الأمر بإنشاء أو تحديث التكوينات الخاصة بالـ HTTPRoute، التي توجه حركة المرور إلى خدمات مختلفة بناءً على مسار URL.
+
+### 2. مراجعة تكوين الـ HTTPRoute
+
+**الأمر:**
+```bash
+yq load-balancing-http-route.yaml
+```
+
+**ما يفعله:**
+- يعرض محتويات ملف التكوين `load-balancing-http-route.yaml` بتنسيق YAML.
+
+**التكوين المتوقع:**
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: HTTPRoute
+metadata:
+  name: load-balancing-route
+  namespace: gamma
+spec:
+  parentRefs:
+    - group: ""
+      kind: Service
+      name: echo
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /load-balancing
+      backendRefs:
+        - kind: Service
+          name: echo-v1
+          port: 80
+          weight: 50
+        - kind: Service
+          name: echo-v2
+          port: 80
+          weight: 50
+```
+
+**شرح التكوين:**
+- `apiVersion: gateway.networking.k8s.io/v1beta1`: يحدد إصدار API المستخدم.
+- `kind: HTTPRoute`: نوع المورد، هنا هو HTTPRoute.
+- `metadata`:
+  - `name: load-balancing-route`: اسم المورد.
+  - `namespace: gamma`: النطاق الذي ينتمي إليه المورد.
+- `spec`:
+  - `parentRefs`:
+    - `group: ""`: مجموعة فارغة لأننا نتعامل مع خدمة أساسية.
+    - `kind: Service`: نوع المورد الذي ستطبق عليه القواعد.
+    - `name: echo`: اسم الخدمة التي ستوجه إليها حركة المرور.
+  - `rules`:
+    - `matches`:
+      - `path`:
+        - `type: PathPrefix`: يطابق المسارات التي تبدأ بـ `/load-balancing`.
+        - `value: /load-balancing`: المسار الذي سيتم توجيه الطلبات بناءً عليه.
+    - `backendRefs`:
+      - `name: echo-v1`: اسم الخدمة الأولى.
+        - `port: 80`: المنفذ الذي ستوجه إليه حركة المرور.
+        - `weight: 50`: الوزن المخصص لهذه الخدمة (50%).
+      - `name: echo-v2`: اسم الخدمة الثانية.
+        - `port: 80`: المنفذ الذي ستوجه إليه حركة المرور.
+        - `weight: 50`: الوزن المخصص لهذه الخدمة (50%).
+
+**لاحظ:**
+- توازن الحمل يتم بشكل متساوي بين `echo-v1` و `echo-v2` لأن الوزن 50% لكل منهما.
+
+### 3. التحقق من توازن الحمل
+
+**الأمر:**
+```bash
+kubectl -n gamma exec -it client -- bash -c '
+for _ in {1..500}; do
+  curl -s -k "http://echo/load-balancing" >> curlresponses.txt;
+done
+grep -o "Hostname=echo-v1" curlresponses.txt | sort | uniq -c
+grep -o "Hostname=echo-v2" curlresponses.txt | sort | uniq -c
+'
+```
+
+**ما يفعله:**
+- يقوم هذا السكربت بإرسال 500 طلب إلى `/load-balancing` من الحاوية `client` ويجمع الاستجابات في ملف `curlresponses.txt`.
+- بعد ذلك، يستخدم الأمر `grep` لحساب عدد الاستجابات التي جاءت من `echo-v1` و `echo-v2`.
+
+**نتائج التحقق:**
+- تحقق من أن الاستجابات موزعة بشكل متساوي بين `echo-v1` و `echo-v2`. هذا يؤكد أن توازن الحمل يعمل كما هو متوقع.
+
+### ملخص
+
+نستخدم `HTTPRoute` لتوجيه حركة المرور داخل الكلاستر (East-West) وتوزيعها بالتساوي بين خدمات متعددة باستخدام الوزن المحدد في التكوين.
+
+———————————————————————————————————————————————————
+
+### 🔢 90/10 Traffic Split
+
+في هذا الجزء، نريد تعديل إعدادات LB لتكون بنسبة 90/10 بدلاً من النسبة المتساوية 50/50. سنستخدم نفس المكونات، ولكن مع تغييرات في الوزن.
+
+### 1. تعديل إعدادات LB
+
+**المطلوب:**
+- تعديل weight بين `echo-v1` و `echo-v2` لتكون 90/10 بدلاً من 50/50.
+
+**الأمر:**
+```bash
+kubectl -n gamma edit httproutes load-balancing-route
+```
+
+**ما يفعله:**
+- يفتح المحرر `vi` لتحرير تكوين `HTTPRoute` مباشرة على خادم API.
+
+**التعديلات:**
+- ابحث عن الأسطر التي تحدد الوزن في قسم `backendRefs`:
+    ```yaml
+    backendRefs:
+    - kind: Service
+      name: echo-v1
+      port: 80
+      weight: 50
+    - kind: Service
+      name: echo-v2
+      port: 80
+      weight: 50
+    ```
+
+- قم بتغييرweight إلى:
+    ```yaml
+    backendRefs:
+    - kind: Service
+      name: echo-v1
+      port: 80
+      weight: 90
+    - kind: Service
+      name: echo-v2
+      port: 80
+      weight: 10
+    ```
+
+ ```
+
+### 2. إعادة اختبار LB
+
+**الأمر:**
+```bash
+kubectl -n gamma exec -it client -- bash -c '
+for _ in {1..500}; do
+  curl -s -k "http://echo/load-balancing" >> curlresponses9010.txt;
+done
+grep -o "Hostname=echo-v1" curlresponses9010.txt | sort | uniq -c
+grep -o "Hostname=echo-v2" curlresponses9010.txt | sort | uniq -c
+'
+```
+
+**ما يفعله:**
+- يقوم هذا السكربت بإرسال 500 طلب إلى `/load-balancing` وتخزين الاستجابات في ملف `curlresponses9010.txt`.
+- بعد ذلك، يستخدم `grep` لحساب عدد الاستجابات التي جاءت من `echo-v1` و `echo-v2`.
+
+**النتائج المتوقعة:**
+- تحقق من أن الاستجابات موزعة بشكل تقريبي بنسبة 90% إلى `echo-v1` و 10% إلى `echo-v2`. هذا يؤكد أن توازن الحمل يتم بشكل صحيح وفقًا للوزن الجديد.
