@@ -186,7 +186,7 @@ spec:
 
 #### كتابة الـ Network Policy:
 
-ملف `policy.yml`:
+
 
 ```yaml
 apiVersion: cilium.io/v2
@@ -224,7 +224,7 @@ spec:
     - **ports**: يحدد البورتات والبروتوكولات التي سيتم السماح بالدخول لها:
       - **protocol**: `TCP`، وهو البروتوكول.
       - **port**: `80`، وهو رقم البورت.
-#### تطبيق الـ Network Policy:
+
 
 ```sh
 kubectl apply -f policy.yml
@@ -242,7 +242,7 @@ kubectl apply -f policy.yml
    kubectl exec xwing -- curl -s -XPOST deathstar.default.svc.cluster.local/v1/request-landing
    ```
 
-### استخدام المسارات (Paths) في السياسة
+### استخدام المسارات (Paths) 
 
 لزيادة الأمان، ممكن تحدد المسارات المسموح بيها:
 
@@ -509,7 +509,7 @@ spec:
 ```
 
 
-كل شيء مضبوط وجاهز للاستخدام في Kubernetes.
+
 
 
 ### Adding a Public IP to the Service
@@ -689,7 +689,7 @@ spec:
       color: blue
 ```
 
-### 2. إنشاء سياسة L2
+### 2. إنشاء policy L2
 
 بعد كده، هنعمل سياسة لإعلانات Layer 2 (L2) باستخدام الملف `l2policy.yaml`:
 
@@ -1984,8 +1984,8 @@ root@server:~#
 
 
 🪞 Deploy the mirrored route
-Using the </> Editor, edit the http-mirror-route.yaml manifest and uncomment the filters section (lines 14-19) in the manifest, then apply it in the >_ Terminal:
 
+```yaml
 ---
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: HTTPRoute
@@ -2008,6 +2008,7 @@ spec:
     backendRefs:
     - name: infra-backend-v1
       port: 8080
+ ```
 
 📌kubectl apply -f http-mirror-route.yaml
 
@@ -2214,7 +2215,7 @@ backendRefs:
 ---
 
 📒📒📒📒📒📒📒📒📒📝 **إعادة توجيه ترافيك HTTP**  
-في التحدي ده، هنحول الترافيك من URL لآخر باستخدام Cilium Gateway API. 
+هنحول الترافيك من URL لآخر باستخدام Cilium Gateway API. 
 
 ممكن تتحكم في الـ path، والـ hostname، وكود إعادة التوجيه (زي 301 أو 302) في الرسائل بتاعتك.  
 ده بيفيد في حالة التحويل المؤقت أو الدائم للتطبيق. 📒📒📒📒📒
@@ -2513,9 +2514,9 @@ curl -l -v http://$GATEWAY/scheme-and-host
 
 ---
 
-# 🌐 دعم التوجيه عبر الأسماء (Cross Namespace Support) 🌐
+# 🌐 (Cross Namespace Support) 🌐
 
-التوجيه عبر الأسماء في **Gateway API** بيسمحلك بربط التوجيهات بين Gateways وNamespaces في Kubernetes. الفكرة هنا هي التحكم المستقل بين أجزاء مختلفة من الكلاستر، مع إمكانية استخدام نفس Gateway إذا لزم الأمر. 
+Cross Namespace Support in **Gateway API** بيسمحلك بربط التوجيهات بين Gateways وNamespaces في Kubernetes. الفكرة هنا هي التحكم المستقل بين أجزاء مختلفة من الكلاستر، مع إمكانية استخدام نفس Gateway إذا لزم الأمر. 
 
 ### 📋 ما هو Namespace؟
 
@@ -2549,16 +2550,16 @@ curl -l -v http://$GATEWAY/scheme-and-host
 
 ---
 
-### 🛠️ خطوات التنفيذ:
+### 🛠️ خطوات:
 
 #### 1. إنشاء (Namespaces):
-لدينا أربع مساحات أسماء:
+عندنا 4ns 
 - **infra-ns**
 - **careers**
 - **product**
 - **hr**
 
-لاحظ أن **careers** و **product** لديهم الملصق `shared-gateway-access=true`، بينما **hr** لا يحتوي على هذا Label.
+لاحظ أن **careers** و **product**  عندهم label `shared-gateway-access=true`، بينما **hr** لا يحتوي على هذا Label.
 
 #### 2. نشر الـ Gateway API و الـ HTTPRoutes:
 نقوم بنشر الـ Gateway API فيNamespace اسم `infra-ns` بحيث يكون موصولاً مع HTTPRoutes من Namespace الأخرى.
@@ -2727,7 +2728,7 @@ kubectl get httproutes.gateway.networking.k8s.io -n hr -o jsonpath='{.items[0].s
  ## 🚀⛕ Internal Layer 7 Traffic Management Used by Cilium Gateway API 🚀
 East-West traffic
 📍📍📍📍📍📍📍📍📍📍📍📍📍📍📍📍📍
-بالطبع، سأشرح لك الـ YAML files الخاصة بـ Kubernetes بطريقة مفصلة وباللغة العامية المصرية، وسأستخدم الإيموجي لتوضيح الأمور بشكل أفضل.
+
 
 ---
 
