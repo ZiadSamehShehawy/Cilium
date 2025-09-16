@@ -94,13 +94,13 @@ Cilium بيضيف CRDs لكوبي:
 
 # 🎯 الخلاصة
 
-* **Cilium Agent:** بيدير الـ datapath (routing, policies, load balancing).
-* **Cilium Operator:** بيهاندل الـ control-plane والـ CRDs.
-* **Hubble (Relay + UI):** monitoring و observability للـ traffic.
-* **Envoy:** Layer 7 proxy للـ advanced policies.
-* **CLI:** لإدارة و debugging.
-* **CRDs:** تعبير عن السياسات اللي كـ Admin بتكتبها.
-* **eBPF:** التكنولوجيا الأساسية اللي مشغلة كل ده.
+* **ال Cilium Agent:** بيدير الـ datapath (routing, policies, load balancing).
+* **ال Cilium Operator:** بيهاندل الـ control-plane والـ CRDs.
+* **ال Hubble (Relay + UI):** monitoring و observability للـ traffic.
+* **ال Envoy:** Layer 7 proxy للـ advanced policies.
+* **ال CLI:** لإدارة و debugging.
+* **ال CRDs:** تعبير عن السياسات اللي كـ Admin بتكتبها.
+* **ال eBPF:** التكنولوجيا الأساسية اللي مشغلة كل ده.
 
 ---
 
