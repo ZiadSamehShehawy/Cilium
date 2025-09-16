@@ -83,7 +83,7 @@ Cilium بيضيف CRDs لكوبي:
 ### 7. **Datapath (eBPF)**
 
 * ده مش Component “Pod”، ده الأساس كله.
-* Cilium مش بيستخدم iptables عادي، بيستخدم **eBPF programs** جوه الـ Kernel.
+*  ال Cilium مش بيستخدم iptables عادي، بيستخدم **eBPF programs** جوه الـ Kernel.
 * مميزات ده:
 
   * أسرع بكتير من iptables.
